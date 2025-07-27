@@ -3,17 +3,29 @@ from __future__ import annotations
 import asyncio
 import logging
 from asyncio import CancelledError
+from functools import partial
 
+import msgspec
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.client.telegram import PRODUCTION
+from aiogram.fsm.storage.base import DefaultKeyBuilder
 from aiogram.fsm.storage.memory import SimpleEventIsolation
+from aiogram.fsm.storage.redis import RedisStorage
 from aiogram.types import BotCommand
 
 from bot import handlers
-from bot.settings import se, Settings
+from bot.db.base import close_db, create_db_session_pool, init_db
+from bot.middlewares.throw_user import ThrowUserMiddleware
+from bot.middlewares.throw_session import ThrowDBSessionMiddleware
+from bot.settings import Settings, se
+from dotenv import load_dotenv
+from bot.db.models import Base  # noqa
 
+
+load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -22,10 +34,20 @@ logger.setLevel(logging.INFO)
 
 async def startup(dispatcher: Dispatcher, bot: Bot, se: Settings) -> None:
     await bot.delete_webhook(drop_pending_updates=True)
-    await bot.send_message(chat_id=se.developer_id, text="Bot started")
+
+    engine, db_session = await create_db_session_pool(se)
+
+    await init_db(engine)
+    dispatcher.workflow_data.update({"sessionmaker": db_session, "db_session_closer": partial(close_db, engine)})
+
+    dispatcher.update.outer_middleware(ThrowDBSessionMiddleware(session_pool=db_session))
+    dispatcher.update.outer_middleware(ThrowUserMiddleware())
+
+    logger.info("Bot started")
 
 
 async def shutdown(dispatcher: Dispatcher) -> None:
+    await dispatcher["db_session_closer"]()
     logger.info("Bot stopped")
 
 
@@ -43,17 +65,23 @@ async def main() -> None:
     bot = Bot(
         token=se.bot_token,
         session=AiohttpSession(api=api),
-        default=DefaultBotProperties(parse_mode="HTML"),
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    )
+
+    storage = RedisStorage(
+        redis=await se.redis_dsn(),
+        key_builder=DefaultKeyBuilder(with_bot_id=True, with_destiny=True),
+        json_loads=msgspec.json.decode,
+        json_dumps=partial(lambda obj: str(msgspec.json.encode(obj), encoding="utf-8")),
     )
 
     dp = Dispatcher(
+        storage=storage,
         events_isolation=SimpleEventIsolation(),
-        se=se,
-        developer_id=se.developer_id,
     )
 
     dp.include_routers(handlers.router)
-    dp.startup.register(startup)
+    dp.startup.register(partial(startup, se=se))
     dp.shutdown.register(shutdown)
     await set_default_commands(bot)
 
