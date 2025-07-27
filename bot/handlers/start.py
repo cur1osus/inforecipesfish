@@ -17,22 +17,22 @@ router = Router()
 async def start_cmd_with_deep_link(
     message: Message,
     command: CommandObject,
-    session: AsyncSession,
+    sessionmaker,
     state: FSMContext,
     user: UserDB,
 ) -> None:
     args = command.args.split() if command.args else []
     deep_link = args[0]
     if deep_link == "true":
-        print(user.id)
-        _user = await session.get(UserDB, user.id)
-        _user.is_admin = True
-        sections = await session.scalars(select(Section))
-        await message.answer(
-            text="Привет! Теперь ты администратор",
-            reply_markup=await ik_recipe_sections(_user.is_admin, sections),  # pyright: ignore
-        )
-        await session.commit()
+        async with sessionmaker() as session:
+            _user = await session.get(UserDB, user.id)
+            _user.is_admin = True
+            sections = await session.scalars(select(Section))
+            await message.answer(
+                text="Привет! Теперь ты администратор",
+                reply_markup=await ik_recipe_sections(_user.is_admin, sections),  # pyright: ignore
+            )
+            await session.commit()
 
 
 @router.message(CommandStart())
