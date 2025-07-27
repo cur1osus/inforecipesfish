@@ -1,0 +1,17 @@
+[project]
+name = "inforecipesfish"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "aiogram>=3.21.0",
+    "dotenv>=0.9.9",
+    "redis>=6.2.0",
+    "sqlalchemy>=2.0.41",
+]
+
+
+[tool.pyright]
+reportOptionalMemberAccess = false
+reportAttributeAccessIssue = false
