@@ -55,7 +55,7 @@ async def apply_recipe_delete_callback(
             recipes,
             user.is_admin,
             section.id,
-            "recipes_by_section",
+            "recipes_by_section" if recipes else "all_sections",
         ),
     )
     await session.commit()
